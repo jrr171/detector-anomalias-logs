@@ -12,13 +12,12 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 # =========================
 # 🎯 CONFIG
 # =========================
-st.set_page_config(page_title="Detector de Anomalías en Logs - Tesis", layout="wide")
+st.set_page_config(page_title="Detector de Anomalías en Logs", layout="wide")
 
 st.title("🔍 Detector de Anomalías en Logs (Nivel Tesis)")
-st.write("Análisis de anomalías usando múltiples modelos de Machine Learning")
 
 # =========================
-# 📂 UPLOAD
+# 📂 SUBIDA
 # =========================
 archivo = st.file_uploader("Sube tu archivo CSV", type=["csv"])
 
@@ -35,15 +34,14 @@ def extraer_features_texto(texto):
         "num_numeros": len(re.findall(r'\d+', texto))
     }
 
-def preparar_datos(df):
-    df["longitud_evento"] = df.iloc[:, -1].astype(str).apply(len)
+def preparar_datos(df, columna_texto):
+    df["longitud_evento"] = df[columna_texto].astype(str).apply(len)
 
-    # texto
-    features_texto = df.iloc[:, -1].apply(extraer_features_texto)
+    features_texto = df[columna_texto].apply(extraer_features_texto)
     df_texto = pd.DataFrame(features_texto.tolist())
+
     df = pd.concat([df, df_texto], axis=1)
 
-    # tiempo
     if "Time" in df.columns:
         df["hora"] = pd.to_datetime(df["Time"], errors='coerce').dt.hour
         df["hora"] = df["hora"].fillna(0)
@@ -52,9 +50,15 @@ def preparar_datos(df):
 
     return df
 
-def vectorizar_texto(df):
+def vectorizar_texto(df, columna_texto):
+    textos = df[columna_texto].fillna("").astype(str)
+
+    # evitar vocabulario vacío
+    textos = textos.apply(lambda x: x if x.strip() != "" else "vacio")
+
     vectorizer = TfidfVectorizer(max_features=50)
-    X_text = vectorizer.fit_transform(df.iloc[:, -1].astype(str)).toarray()
+    X_text = vectorizer.fit_transform(textos).toarray()
+
     return X_text
 
 # =========================
@@ -68,6 +72,10 @@ if archivo is not None:
     st.subheader("📊 Vista previa")
     st.dataframe(df.head())
 
+    # Selección de columna de logs
+    columna_texto = st.selectbox("Selecciona la columna de logs", df.columns)
+
+    # Estado persistente
     if "analizar" not in st.session_state:
         st.session_state.analizar = False
 
@@ -77,17 +85,17 @@ if archivo is not None:
     if st.session_state.analizar:
 
         # =========================
-        # ⚙️ SIDEBAR
+        # ⚙️ CONFIG
         # =========================
         st.sidebar.header("⚙️ Configuración")
 
         contaminacion = st.sidebar.slider("Contaminación", 0.01, 0.2, 0.05)
-        n_estimators = st.sidebar.slider("Árboles (IF)", 50, 300, 100)
+        n_estimators = st.sidebar.slider("Árboles (Isolation Forest)", 50, 300, 100)
 
         # =========================
         # 🔧 PREPARACIÓN
         # =========================
-        df = preparar_datos(df)
+        df = preparar_datos(df, columna_texto)
 
         X_base = df[
             [
@@ -101,12 +109,12 @@ if archivo is not None:
         ].values
 
         # TF-IDF
-        X_text = vectorizar_texto(df)
+        X_text = vectorizar_texto(df, columna_texto)
 
-        # Combinar
+        # Combinar features
         X = np.hstack((X_base, X_text))
 
-        st.write("Dimensión del dataset:", X.shape)
+        st.write("📐 Dimensión del dataset:", X.shape)
 
         # =========================
         # 🤖 MODELOS
@@ -139,7 +147,10 @@ if archivo is not None:
         st.subheader("📊 Resultados (primeros 100)")
         st.dataframe(df.head(100))
 
-        # Conteo
+        # =========================
+        # 📈 COMPARACIÓN
+        # =========================
+
         st.subheader("📈 Comparación de modelos")
 
         col1, col2, col3 = st.columns(3)
@@ -160,12 +171,12 @@ if archivo is not None:
         # 📉 VISUALIZACIÓN
         # =========================
 
-        st.subheader("📉 Visualización de anomalías (IF)")
+        st.subheader("📉 Visualización (Isolation Forest)")
 
         fig, ax = plt.subplots()
         ax.scatter(df["hora"], df["longitud_evento"], c=df["anomaly_if"])
         ax.set_xlabel("Hora")
-        ax.set_ylabel("Longitud evento")
+        ax.set_ylabel("Longitud del evento")
 
         st.pyplot(fig)
 
@@ -176,11 +187,11 @@ if archivo is not None:
         st.subheader("📊 Métricas")
 
         total = len(df)
-        anom_if = len(df[df["anomaly_if"] == -1])
+        anom = len(df[df["anomaly_if"] == -1])
 
         st.write(f"Total registros: {total}")
-        st.write(f"Anomalías (IF): {anom_if}")
-        st.write(f"% Anomalías: {anom_if / total:.2%}")
+        st.write(f"Anomalías detectadas (IF): {anom}")
+        st.write(f"Porcentaje: {anom / total:.2%}")
 
         # =========================
         # 💾 DESCARGAS
@@ -191,5 +202,5 @@ if archivo is not None:
         csv_all = df.to_csv(index=False).encode("utf-8")
         csv_anom = df[df["anomaly_if"] == -1].to_csv(index=False).encode("utf-8")
 
-        st.download_button("Descargar todo", csv_all, "resultado_completo.csv")
-        st.download_button("Descargar anomalías", csv_anom, "anomalias.csv")
+        st.download_button("⬇️ Descargar todo", csv_all, "resultado_completo.csv")
+        st.download_button("⬇️ Descargar anomalías", csv_anom, "anomalias.csv")
