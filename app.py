@@ -14,7 +14,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 # =========================
 st.set_page_config(page_title="Detector de Anomalías en Logs", layout="wide")
 
-st.title("🔍 Detector de Anomalías en Logs (Nivel Tesis)")
+st.title("🔍 Detector de Anomalías en Logs")
 
 # =========================
 # 📂 SUBIDA
