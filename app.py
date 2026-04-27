@@ -35,7 +35,7 @@ archivo_historico = "historico.csv"
 # ================================
 # INTERFAZ
 # ================================
-st.title("Detector de Anomalías con Histórico (Autoencoder)")
+st.title("Autoencoder")
 
 if st.button("🗑️ Borrar histórico"):
     if os.path.exists(archivo_historico):
