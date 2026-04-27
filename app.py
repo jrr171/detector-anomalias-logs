@@ -100,4 +100,32 @@ if archivo is not None:
         threshold = np.percentile(mse, 97)
 
         df["anomaly"] = mse > threshold
-        df["fecha_evaluacion"] = dat
+        df["fecha_evaluacion"] = datetime.now()
+
+        # GUARDAR HISTÓRICO
+        if os.path.exists(archivo_historico):
+            df_old = pd.read_csv(archivo_historico)
+            df_total = pd.concat([df_old, df], ignore_index=True)
+        else:
+            df_total = df
+
+        df_total.to_csv(archivo_historico, index=False)
+
+        # RESULTADO ACTUAL
+        st.subheader("📌 Resultado de esta carga")
+        st.dataframe(df)
+
+        # GRÁFICO
+        st.subheader("Gráfico de error")
+        fig, ax = plt.subplots()
+        ax.plot(mse, label="Error (MSE)")
+        ax.axhline(y=threshold, linestyle='--', label="Umbral")
+        anomaly_points = np.where(mse > threshold)[0]
+        ax.scatter(anomaly_points, mse[anomaly_points], color="red", label="Anomalía")
+        ax.set_title("Detección de anomalías")
+        ax.legend()
+        st.pyplot(fig)
+
+        # RESUMEN
+        st.write(f"Total registros: {len(df)}")
+        st.write(f"Anomalías detectadas: {df['anomaly'].sum()}")
