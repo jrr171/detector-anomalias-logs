@@ -7,6 +7,7 @@ import numpy as np
 import os
 from datetime import datetime
 import uuid
+import pytz
 
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.neural_network import MLPRegressor
@@ -16,6 +17,7 @@ from sklearn.neural_network import MLPRegressor
 # CONFIG
 # ================================
 archivo_historico = "historico.csv"
+zona_peru = pytz.timezone("America/Lima")
 
 if "analizado" not in st.session_state:
     st.session_state.analizado = False
@@ -50,10 +52,12 @@ if st.button("🗑️ Borrar histórico"):
 
 
 # ================================
-# MOSTRAR RESUMEN SIEMPRE
+# RESUMEN HISTÓRICO
 # ================================
 if os.path.exists(archivo_historico):
+
     df_hist = pd.read_csv(archivo_historico)
+
     df_hist["fecha_evaluacion"] = pd.to_datetime(
         df_hist["fecha_evaluacion"], errors="coerce"
     ).dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -64,6 +68,7 @@ if os.path.exists(archivo_historico):
 
     st.subheader("📈 Resumen por carga")
     st.dataframe(resumen)
+
 else:
     st.info("Aún no hay datos en el histórico")
 
@@ -96,6 +101,7 @@ if archivo is not None:
         }
 
         columna_fecha = None
+
         for col in df.columns:
             if "fecha" in col.lower():
                 columna_fecha = col
@@ -115,7 +121,7 @@ if archivo is not None:
             st.info("No se encontró columna de fecha")
 
         # ================================
-        # NUMÉRICOS
+        # DATOS NUMÉRICOS
         # ================================
         X = df.select_dtypes(include=["int64", "float64"])
 
@@ -133,7 +139,7 @@ if archivo is not None:
         # AUTOENCODER con MLPRegressor
         # ================================
         autoencoder = MLPRegressor(
-            hidden_layer_sizes=(16, 8, 4, 8, 16),  # mismo esquema encoder-decoder
+            hidden_layer_sizes=(16, 8, 4, 8, 16),
             activation="relu",
             solver="adam",
             max_iter=20,
@@ -154,12 +160,12 @@ if archivo is not None:
         df["anomaly"] = mse > threshold
 
         # ================================
-        # METADATA
+        # METADATA (HORA PERÚ)
         # ================================
         id_carga = str(uuid.uuid4())
         df["id_carga"] = id_carga
         df["archivo_nombre"] = archivo.name
-        df["fecha_evaluacion"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        df["fecha_evaluacion"] = datetime.now(zona_peru).strftime("%Y-%m-%d %H:%M:%S")
 
         # ================================
         # GUARDAR HISTÓRICO
@@ -177,18 +183,20 @@ if archivo is not None:
 
         st.subheader("📌 Resultado de esta carga")
         st.dataframe(df)
+
         st.write(f"Total registros: {len(df)}")
         st.write(f"Anomalías detectadas: {df['anomaly'].sum()}")
 
 
 # ================================
-# MOSTRAR DETALLE SOLO SI ANALIZÓ
+# VER ANOMALÍAS POR CARGA
 # ================================
 if st.session_state.analizado and os.path.exists(archivo_historico):
 
     df_hist = pd.read_csv(archivo_historico)
 
     st.subheader("🔎 Ver anomalías por carga")
+
     cargas = df_hist["id_carga"].unique()
 
     carga_sel = st.selectbox(
@@ -202,4 +210,5 @@ if st.session_state.analizado and os.path.exists(archivo_historico):
 
     st.subheader("🚨 Anomalías de la carga seleccionada")
     st.dataframe(anomalías)
+
     st.write(f"Total anomalías: {len(anomalías)}")
