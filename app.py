@@ -6,9 +6,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Dense
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.neural_network import MLPRegressor
 
 
 # ================================
@@ -47,35 +46,24 @@ if archivo is not None:
         X_scaled = scaler.fit_transform(X)
 
         # ================================
-        # 3. AUTOENCODER (MEJORADO)
+        # 3. AUTOENCODER con sklearn
         # ================================
         input_dim = X_scaled.shape[1]
 
-        input_layer = Input(shape=(input_dim,))
-
-        # Encoder (más profundo)
-        encoded = Dense(16, activation="relu")(input_layer)
-        encoded = Dense(8, activation="relu")(encoded)
-        encoded = Dense(4, activation="relu")(encoded)
-
-        # Decoder
-        decoded = Dense(8, activation="relu")(encoded)
-        decoded = Dense(16, activation="relu")(decoded)
-        decoded = Dense(input_dim, activation="sigmoid")(decoded)
-
-        autoencoder = Model(inputs=input_layer, outputs=decoded)
-        autoencoder.compile(optimizer="adam", loss="mse")
+        # MLPRegressor como autoencoder: entrada → capas reducidas → salida igual a entrada
+        autoencoder = MLPRegressor(
+            hidden_layer_sizes=(16, 8, 4, 8, 16),
+            activation="relu",
+            solver="adam",
+            max_iter=100,
+            random_state=42
+        )
 
         # ================================
-        # 4. ENTRENAMIENTO (MEJORADO)
+        # 4. ENTRENAMIENTO
         # ================================
         with st.spinner("Entrenando modelo..."):
-            autoencoder.fit(
-                X_scaled, X_scaled,
-                epochs=40,          # 🔥 más aprendizaje
-                batch_size=32,
-                verbose=0
-            )
+            autoencoder.fit(X_scaled, X_scaled)
 
         # ================================
         # 5. DETECCIÓN
@@ -84,7 +72,6 @@ if archivo is not None:
 
         mse = np.mean(np.power(X_scaled - reconstructions, 2), axis=1)
 
-        # 🔥 Umbral mejorado
         threshold = np.percentile(mse, 97)
 
         df["anomaly"] = mse > threshold
@@ -100,7 +87,7 @@ if archivo is not None:
         ax.axhline(y=threshold, linestyle='--', label="Umbral")
 
         anomaly_points = np.where(mse > threshold)[0]
-        ax.scatter(anomaly_points, mse[anomaly_points])
+        ax.scatter(anomaly_points, mse[anomaly_points], color="red", label="Anomalía")
 
         ax.set_title("Detección de anomalías")
         ax.set_xlabel("Registros")
@@ -112,7 +99,7 @@ if archivo is not None:
         # ================================
         # 7. RESULTADOS
         # ================================
-        normales = df[df["anomaly"] == False]
+        normales  = df[df["anomaly"] == False]
         anomalias = df[df["anomaly"] == True]
 
         st.subheader("Datos normales")
