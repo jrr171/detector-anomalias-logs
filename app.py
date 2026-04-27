@@ -35,7 +35,7 @@ archivo_historico = "historico.csv"
 # ================================
 # INTERFAZ
 # ================================
-st.title("Analisis de Anomalias")
+st.title("Análisis de Anomalías")
 
 if st.button("🗑️ Borrar histórico"):
     if os.path.exists(archivo_historico):
@@ -59,24 +59,18 @@ if archivo is not None:
 
     if st.button("Analizar"):
 
-        # ================================
         # 1. SELECCIÓN DE DATOS
-        # ================================
         X = df.select_dtypes(include=["int64", "float64"])
 
         if X.shape[1] == 0:
             df["valor"] = range(len(df))
             X = df[["valor"]]
 
-        # ================================
         # 2. ESCALADO
-        # ================================
         scaler = MinMaxScaler()
         X_scaled = scaler.fit_transform(X)
 
-        # ================================
         # 3. AUTOENCODER con sklearn
-        # ================================
         autoencoder = MLPRegressor(
             hidden_layer_sizes=(16, 8, 4, 8, 16),
             activation="relu",
@@ -85,27 +79,19 @@ if archivo is not None:
             random_state=42
         )
 
-        # ================================
         # 4. ENTRENAMIENTO
-        # ================================
         with st.spinner("Entrenando modelo..."):
             autoencoder.fit(X_scaled, X_scaled)
 
-        # ================================
         # 5. DETECCIÓN
-        # ================================
         reconstructions = autoencoder.predict(X_scaled)
-
         mse = np.mean(np.power(X_scaled - reconstructions, 2), axis=1)
-
         threshold = np.percentile(mse, 97)
 
         df["anomaly"] = mse > threshold
-        df["fecha_evaluacion"] = datetime.now().date()
+        df["fecha_evaluacion"] = datetime.now()
 
-        # ================================
         # 6. GUARDAR HISTÓRICO
-        # ================================
         if os.path.exists(archivo_historico):
             df_existente = pd.read_csv(archivo_historico)
             df_total = pd.concat([df_existente, df], ignore_index=True)
@@ -115,9 +101,11 @@ if archivo is not None:
 
         df_total.to_csv(archivo_historico, index=False)
 
-        # ================================
-        # 7. GRÁFICO
-        # ================================
+        # 7. MOSTRAR ESTA CARGA
+        st.subheader("📌 Datos de esta carga")
+        st.dataframe(df)
+
+        # 8. GRÁFICO
         st.subheader("Gráfico de error")
 
         fig, ax = plt.subplots()
@@ -131,20 +119,5 @@ if archivo is not None:
         ax.legend()
         st.pyplot(fig)
 
-        # ================================
-        # 8. RESULTADOS
-        # ================================
-        st.subheader("Anomalías detectadas")
-        st.dataframe(df[df["anomaly"] == True])
-
+        # 9. RESUMEN
         st.write(f"Total registros: {len(df)}")
-        st.write(f"Anomalías detectadas: {df['anomaly'].sum()}")
-
-
-# ================================
-# MOSTRAR HISTÓRICO
-# ================================
-if os.path.exists(archivo_historico):
-    st.subheader("📊 Histórico acumulado")
-    df_hist = pd.read_csv(archivo_historico)
-    st.dataframe(df_hist)
