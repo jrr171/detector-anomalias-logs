@@ -24,12 +24,12 @@ archivo = st.file_uploader("Sube tu archivo CSV", type=["csv"])
 if archivo is not None:
 
     try:
-    df = pd.read_csv(archivo, sep=None, engine="python", encoding="utf-8")
-except UnicodeDecodeError:
-    df = pd.read_csv(archivo, sep=None, engine="python", encoding="latin-1")
-except Exception as e:
-    st.error(f"No se pudo leer el archivo: {e}")
-    st.stop()
+        df = pd.read_csv(archivo, sep=None, engine="python", encoding="utf-8")
+    except UnicodeDecodeError:
+        df = pd.read_csv(archivo, sep=None, engine="python", encoding="latin-1")
+    except Exception as e:
+        st.error(f"No se pudo leer el archivo: {e}")
+        st.stop()
 
     st.subheader("Vista previa de datos")
     st.dataframe(df.head())
