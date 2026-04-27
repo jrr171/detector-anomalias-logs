@@ -8,9 +8,8 @@ import matplotlib.pyplot as plt
 import os
 from datetime import datetime
 
-from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Dense
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.neural_network import MLPRegressor
 
 
 # ================================
@@ -38,14 +37,12 @@ archivo_historico = "historico.csv"
 # ================================
 st.title("Detector de Anomalías con Histórico (Autoencoder)")
 
-# 🔴 BOTÓN BORRAR HISTÓRICO
 if st.button("🗑️ Borrar histórico"):
     if os.path.exists(archivo_historico):
         os.remove(archivo_historico)
         st.success("Histórico eliminado correctamente")
     else:
         st.warning("No existe histórico aún")
-
 
 archivo = st.file_uploader("Sube tu archivo CSV", type=["csv"])
 
@@ -78,32 +75,21 @@ if archivo is not None:
         X_scaled = scaler.fit_transform(X)
 
         # ================================
-        # 3. AUTOENCODER
+        # 3. AUTOENCODER con sklearn
         # ================================
-        input_dim = X_scaled.shape[1]
-
-        input_layer = Input(shape=(input_dim,))
-        encoded = Dense(16, activation="relu")(input_layer)
-        encoded = Dense(8, activation="relu")(encoded)
-        encoded = Dense(4, activation="relu")(encoded)
-
-        decoded = Dense(8, activation="relu")(encoded)
-        decoded = Dense(16, activation="relu")(decoded)
-        decoded = Dense(input_dim, activation="sigmoid")(decoded)
-
-        autoencoder = Model(inputs=input_layer, outputs=decoded)
-        autoencoder.compile(optimizer="adam", loss="mse")
+        autoencoder = MLPRegressor(
+            hidden_layer_sizes=(16, 8, 4, 8, 16),
+            activation="relu",
+            solver="adam",
+            max_iter=100,
+            random_state=42
+        )
 
         # ================================
         # 4. ENTRENAMIENTO
         # ================================
         with st.spinner("Entrenando modelo..."):
-            autoencoder.fit(
-                X_scaled, X_scaled,
-                epochs=20,
-                batch_size=32,
-                verbose=0
-            )
+            autoencoder.fit(X_scaled, X_scaled)
 
         # ================================
         # 5. DETECCIÓN
@@ -115,8 +101,6 @@ if archivo is not None:
         threshold = np.percentile(mse, 97)
 
         df["anomaly"] = mse > threshold
-
-        # 🟢 NUEVO: FECHA DE EVALUACIÓN
         df["fecha_evaluacion"] = datetime.now().date()
 
         # ================================
@@ -125,8 +109,6 @@ if archivo is not None:
         if os.path.exists(archivo_historico):
             df_existente = pd.read_csv(archivo_historico)
             df_total = pd.concat([df_existente, df], ignore_index=True)
-
-            # Evitar duplicados
             df_total = df_total.drop_duplicates()
         else:
             df_total = df
@@ -139,16 +121,14 @@ if archivo is not None:
         st.subheader("Gráfico de error")
 
         fig, ax = plt.subplots()
-
         ax.plot(mse, label="Error (MSE)")
         ax.axhline(y=threshold, linestyle='--', label="Umbral")
 
         anomaly_points = np.where(mse > threshold)[0]
-        ax.scatter(anomaly_points, mse[anomaly_points])
+        ax.scatter(anomaly_points, mse[anomaly_points], color="red", label="Anomalía")
 
         ax.set_title("Detección de anomalías")
         ax.legend()
-
         st.pyplot(fig)
 
         # ================================
@@ -157,9 +137,6 @@ if archivo is not None:
         st.subheader("Anomalías detectadas")
         st.dataframe(df[df["anomaly"] == True])
 
-        # ================================
-        # 9. RESUMEN
-        # ================================
         st.write(f"Total registros: {len(df)}")
         st.write(f"Anomalías detectadas: {df['anomaly'].sum()}")
 
