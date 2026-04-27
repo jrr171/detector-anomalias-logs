@@ -5,15 +5,47 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+from datetime import datetime
 
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.neural_network import MLPRegressor
+
+
+# ================================
+# FUNCIÓN PARA LEER CSV
+# ================================
+def leer_csv(archivo):
+    try:
+        df = pd.read_csv(archivo, sep=None, engine='python', encoding='utf-8')
+    except:
+        try:
+            df = pd.read_csv(archivo, sep=";", encoding="latin1")
+        except:
+            df = pd.read_csv(archivo, sep=",", encoding="latin1", on_bad_lines='skip')
+    return df
+
+
+# ================================
+# CONFIG HISTÓRICO
+# ================================
+archivo_historico = "historico.csv"
 
 
 # ================================
 # INTERFAZ
 # ================================
-st.title("Detector de Anomalías con Deep Learning (Autoencoder)")
+st.title("Detector de Anomalías con Histórico (Autoencoder)")
+
+# 🔴 BOTÓN BORRAR HISTÓRICO
+if st.button("🗑️ Borrar histórico"):
+    if os.path.exists(archivo_historico):
+        os.remove(archivo_historico)
+        st.success("Histórico eliminado correctamente")
+    else:
+        st.warning("No existe histórico aún")
+
 
 archivo = st.file_uploader("Sube tu archivo CSV", type=["csv"])
 
@@ -23,15 +55,9 @@ archivo = st.file_uploader("Sube tu archivo CSV", type=["csv"])
 # ================================
 if archivo is not None:
 
-    try:
-        df = pd.read_csv(archivo, sep=None, engine="python", encoding="utf-8")
-    except UnicodeDecodeError:
-        df = pd.read_csv(archivo, sep=None, engine="python", encoding="latin-1")
-    except Exception as e:
-        st.error(f"No se pudo leer el archivo: {e}")
-        st.stop()
+    df = leer_csv(archivo)
 
-    st.subheader("Vista previa de datos")
+    st.subheader("Vista previa")
     st.dataframe(df.head())
 
     if st.button("Analizar"):
@@ -52,24 +78,32 @@ if archivo is not None:
         X_scaled = scaler.fit_transform(X)
 
         # ================================
-        # 3. AUTOENCODER con sklearn
+        # 3. AUTOENCODER
         # ================================
         input_dim = X_scaled.shape[1]
 
-        # MLPRegressor como autoencoder: entrada → capas reducidas → salida igual a entrada
-        autoencoder = MLPRegressor(
-            hidden_layer_sizes=(16, 8, 4, 8, 16),
-            activation="relu",
-            solver="adam",
-            max_iter=100,
-            random_state=42
-        )
+        input_layer = Input(shape=(input_dim,))
+        encoded = Dense(16, activation="relu")(input_layer)
+        encoded = Dense(8, activation="relu")(encoded)
+        encoded = Dense(4, activation="relu")(encoded)
+
+        decoded = Dense(8, activation="relu")(encoded)
+        decoded = Dense(16, activation="relu")(decoded)
+        decoded = Dense(input_dim, activation="sigmoid")(decoded)
+
+        autoencoder = Model(inputs=input_layer, outputs=decoded)
+        autoencoder.compile(optimizer="adam", loss="mse")
 
         # ================================
         # 4. ENTRENAMIENTO
         # ================================
         with st.spinner("Entrenando modelo..."):
-            autoencoder.fit(X_scaled, X_scaled)
+            autoencoder.fit(
+                X_scaled, X_scaled,
+                epochs=20,
+                batch_size=32,
+                verbose=0
+            )
 
         # ================================
         # 5. DETECCIÓN
@@ -82,10 +116,27 @@ if archivo is not None:
 
         df["anomaly"] = mse > threshold
 
+        # 🟢 NUEVO: FECHA DE EVALUACIÓN
+        df["fecha_evaluacion"] = datetime.now().date()
+
         # ================================
-        # 6. GRÁFICO DE ERROR
+        # 6. GUARDAR HISTÓRICO
         # ================================
-        st.subheader("Gráfico de error de reconstrucción")
+        if os.path.exists(archivo_historico):
+            df_existente = pd.read_csv(archivo_historico)
+            df_total = pd.concat([df_existente, df], ignore_index=True)
+
+            # Evitar duplicados
+            df_total = df_total.drop_duplicates()
+        else:
+            df_total = df
+
+        df_total.to_csv(archivo_historico, index=False)
+
+        # ================================
+        # 7. GRÁFICO
+        # ================================
+        st.subheader("Gráfico de error")
 
         fig, ax = plt.subplots()
 
@@ -93,48 +144,30 @@ if archivo is not None:
         ax.axhline(y=threshold, linestyle='--', label="Umbral")
 
         anomaly_points = np.where(mse > threshold)[0]
-        ax.scatter(anomaly_points, mse[anomaly_points], color="red", label="Anomalía")
+        ax.scatter(anomaly_points, mse[anomaly_points])
 
         ax.set_title("Detección de anomalías")
-        ax.set_xlabel("Registros")
-        ax.set_ylabel("Error")
         ax.legend()
 
         st.pyplot(fig)
 
         # ================================
-        # 7. RESULTADOS
+        # 8. RESULTADOS
         # ================================
-        normales  = df[df["anomaly"] == False]
-        anomalias = df[df["anomaly"] == True]
-
-        st.subheader("Datos normales")
-        st.dataframe(normales)
-
-        st.subheader("⚠️ Anomalías detectadas")
-        st.dataframe(anomalias)
+        st.subheader("Anomalías detectadas")
+        st.dataframe(df[df["anomaly"] == True])
 
         # ================================
-        # 8. RESUMEN
+        # 9. RESUMEN
         # ================================
-        st.subheader("Resumen")
         st.write(f"Total registros: {len(df)}")
-        st.write(f"Anomalías detectadas: {len(anomalias)}")
+        st.write(f"Anomalías detectadas: {df['anomaly'].sum()}")
 
-        # ================================
-        # 9. DISTRIBUCIÓN
-        # ================================
-        st.subheader("Distribución de anomalías")
-        st.bar_chart(df["anomaly"].value_counts())
 
-        # ================================
-        # 10. DESCARGA
-        # ================================
-        csv = df.to_csv(index=False).encode('utf-8')
-
-        st.download_button(
-            label="Descargar resultados",
-            data=csv,
-            file_name="resultado_analisis.csv",
-            mime="text/csv"
-        )
+# ================================
+# MOSTRAR HISTÓRICO
+# ================================
+if os.path.exists(archivo_historico):
+    st.subheader("📊 Histórico acumulado")
+    df_hist = pd.read_csv(archivo_historico)
+    st.dataframe(df_hist)
