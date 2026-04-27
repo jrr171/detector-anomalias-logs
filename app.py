@@ -7,17 +7,20 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from datetime import datetime
+import uuid
 
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.neural_network import MLPRegressor
+
 
 # ================================
 # CONFIG
 # ================================
 archivo_historico = "historico.csv"
 
+
 # ================================
-# FUNCIÓN CSV
+# FUNCIÓN PARA LEER CSV
 # ================================
 def leer_csv(archivo):
     try:
@@ -28,10 +31,11 @@ def leer_csv(archivo):
         except:
             return pd.read_csv(archivo, sep=",", encoding="latin1", on_bad_lines='skip')
 
+
 # ================================
 # INTERFAZ
 # ================================
-st.title("Análisis de Anomalías")
+st.title("Sistema de Detección de Anomalías")
 
 if st.button("🗑️ Borrar histórico"):
     if os.path.exists(archivo_historico):
@@ -40,49 +44,97 @@ if st.button("🗑️ Borrar histórico"):
     else:
         st.warning("No hay histórico")
 
+
 # ================================
-# MOSTRAR HISTÓRICO
+# HISTÓRICO (RESUMEN + FILTRO)
 # ================================
 if os.path.exists(archivo_historico):
-    df_hist = pd.read_csv(archivo_historico)
-    st.subheader("📊 Histórico acumulado")
-    st.dataframe(df_hist)
 
-    df_hist["fecha_evaluacion"] = pd.to_datetime(df_hist["fecha_evaluacion"])
-    resumen = df_hist.groupby(
-        df_hist["fecha_evaluacion"].dt.strftime("%Y-%m-%d %H:%M")
-    ).size().reset_index(name="registros")
+    df_hist = pd.read_csv(archivo_historico)
+
+    df_hist["fecha_evaluacion"] = pd.to_datetime(df_hist["fecha_evaluacion"], errors="coerce")
+    df_hist["fecha_evaluacion"] = df_hist["fecha_evaluacion"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
     st.subheader("📈 Resumen por carga")
+
+    resumen = df_hist.groupby(
+        ["id_carga", "archivo_nombre", "fecha_evaluacion"]
+    ).size().reset_index(name="registros")
+
     st.dataframe(resumen)
+
+    st.subheader("🔎 Ver anomalías por carga")
+
+    cargas = resumen["id_carga"].unique()
+    carga_sel = st.selectbox("Selecciona una carga", cargas)
+
+    df_filtrado = df_hist[df_hist["id_carga"] == carga_sel]
+    anomalias = df_filtrado[df_filtrado["anomaly"] == True]
+
+    st.subheader("🚨 Anomalías de la carga seleccionada")
+    st.dataframe(anomalias)
+    st.write(f"Total anomalías: {len(anomalias)}")
+
 else:
     st.info("Aún no hay datos en el histórico")
 
+
 # ================================
-# SUBIDA DE ARCHIVO
+# SUBIR ARCHIVO
 # ================================
 archivo = st.file_uploader("Sube tu archivo CSV", type=["csv"])
 
+
 # ================================
-# PROCESAR
+# PROCESAR ARCHIVO
 # ================================
 if archivo is not None:
+
     df = leer_csv(archivo)
+
     st.subheader("Vista previa")
     st.dataframe(df.head())
 
     if st.button("Analizar"):
 
-        # NUMÉRICOS
+        # DETECTAR COLUMNA FECHA
+        meses_dict = {
+            1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+            5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
+            9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
+        }
+
+        columna_fecha = None
+        for col in df.columns:
+            if "fecha" in col.lower():
+                columna_fecha = col
+                break
+
+        if columna_fecha:
+            try:
+                df[columna_fecha] = pd.to_datetime(df[columna_fecha], errors="coerce")
+                df["anio"] = df[columna_fecha].dt.year
+                df["mes"] = df[columna_fecha].dt.month
+                df["dia"] = df[columna_fecha].dt.day
+                df["mes_nombre"] = df["mes"].map(meses_dict)
+                st.success(f"Columna de fecha detectada: {columna_fecha}")
+            except:
+                st.warning("No se pudo procesar la columna de fecha")
+        else:
+            st.info("No se encontró columna de fecha")
+
+        # DATOS NUMÉRICOS
         X = df.select_dtypes(include=["int64", "float64"])
+
         if X.shape[1] == 0:
             df["valor"] = range(len(df))
             X = df[["valor"]]
 
-        # ESCALAR
+        # ESCALADO
         scaler = MinMaxScaler()
         X_scaled = scaler.fit_transform(X)
 
-        # MODELO (sklearn en lugar de tensorflow)
+        # AUTOENCODER con sklearn
         autoencoder = MLPRegressor(
             hidden_layer_sizes=(16, 8, 4, 8, 16),
             activation="relu",
@@ -100,7 +152,9 @@ if archivo is not None:
         threshold = np.percentile(mse, 97)
 
         df["anomaly"] = mse > threshold
-        df["fecha_evaluacion"] = datetime.now()
+        df["id_carga"] = str(uuid.uuid4())
+        df["archivo_nombre"] = archivo.name
+        df["fecha_evaluacion"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # GUARDAR HISTÓRICO
         if os.path.exists(archivo_historico):
@@ -115,17 +169,5 @@ if archivo is not None:
         st.subheader("📌 Resultado de esta carga")
         st.dataframe(df)
 
-        # GRÁFICO
-        st.subheader("Gráfico de error")
-        fig, ax = plt.subplots()
-        ax.plot(mse, label="Error (MSE)")
-        ax.axhline(y=threshold, linestyle='--', label="Umbral")
-        anomaly_points = np.where(mse > threshold)[0]
-        ax.scatter(anomaly_points, mse[anomaly_points], color="red", label="Anomalía")
-        ax.set_title("Detección de anomalías")
-        ax.legend()
-        st.pyplot(fig)
-
-        # RESUMEN
         st.write(f"Total registros: {len(df)}")
         st.write(f"Anomalías detectadas: {df['anomaly'].sum()}")
