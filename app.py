@@ -1,214 +1,63 @@
-# ================================
-# IMPORTACIONES
-# ================================
+"""
+pages/comparacion.py — Comparación entre cargas históricas
+"""
 import streamlit as st
 import pandas as pd
-import numpy as np
-import os
-from datetime import datetime
-import uuid
-import pytz
+import plotly.graph_objects as go
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.almacenamiento import cargar_log
 
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.neural_network import MLPRegressor
+PLOT_LAYOUT = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(26,32,53,0.8)",
+    font=dict(color="#e2e8f0", family="Space Grotesk"),
+    margin=dict(l=20, r=20, t=40, b=20),
+)
 
+def render():
+    st.markdown('<div class="section-title">📈 Comparación entre Análisis</div>', unsafe_allow_html=True)
 
-# ================================
-# CONFIG
-# ================================
-archivo_historico = "historico.csv"
-zona_peru = pytz.timezone("America/Lima")
+    df_log = cargar_log()
 
-if "analizado" not in st.session_state:
-    st.session_state.analizado = False
-if "ultima_carga" not in st.session_state:
-    st.session_state.ultima_carga = None
+    if df_log is None or df_log.empty:
+        st.info("Aún no hay análisis registrados. Ve a **Análisis** y procesa un archivo primero.")
+        return
 
+    st.subheader("📋 Log de todos los análisis")
+    st.dataframe(df_log, use_container_width=True)
 
-# ================================
-# FUNCIÓN CSV
-# ================================
-def leer_csv(archivo):
-    try:
-        return pd.read_csv(archivo, sep=None, engine='python', encoding='utf-8')
-    except:
-        try:
-            return pd.read_csv(archivo, sep=";", encoding="latin1")
-        except:
-            return pd.read_csv(archivo, sep=",", encoding="latin1", on_bad_lines='skip')
-
-
-# ================================
-# INTERFAZ
-# ================================
-st.title("Sistema de Detección de Anomalías")
-
-if st.button("🗑️ Borrar histórico"):
-    if os.path.exists(archivo_historico):
-        os.remove(archivo_historico)
-        st.success("Histórico eliminado")
-    else:
-        st.warning("No hay histórico")
-
-
-# ================================
-# RESUMEN HISTÓRICO
-# ================================
-if os.path.exists(archivo_historico):
-
-    df_hist = pd.read_csv(archivo_historico)
-
-    df_hist["fecha_evaluacion"] = pd.to_datetime(
-        df_hist["fecha_evaluacion"], errors="coerce"
-    ).dt.strftime("%Y-%m-%d %H:%M:%S")
-
-    resumen = df_hist.groupby(
-        ["id_carga", "archivo_nombre", "fecha_evaluacion"]
-    ).size().reset_index(name="registros")
-
-    st.subheader("📈 Resumen por carga")
-    st.dataframe(resumen)
-
-else:
-    st.info("Aún no hay datos en el histórico")
-
-
-# ================================
-# SUBIR ARCHIVO
-# ================================
-archivo = st.file_uploader("Sube tu archivo CSV", type=["csv"])
-
-
-# ================================
-# PROCESAR
-# ================================
-if archivo is not None:
-
-    df = leer_csv(archivo)
-
-    st.subheader("Vista previa")
-    st.dataframe(df.head())
-
-    if st.button("Analizar"):
-
-        # ================================
-        # DETECTAR FECHA (OPCIONAL)
-        # ================================
-        meses_dict = {
-            1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
-            5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
-            9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre"
-        }
-
-        columna_fecha = None
-
-        for col in df.columns:
-            if "fecha" in col.lower():
-                columna_fecha = col
-                break
-
-        if columna_fecha:
-            try:
-                df[columna_fecha] = pd.to_datetime(df[columna_fecha], errors="coerce")
-                df["anio"] = df[columna_fecha].dt.year
-                df["mes"] = df[columna_fecha].dt.month
-                df["dia"] = df[columna_fecha].dt.day
-                df["mes_nombre"] = df["mes"].map(meses_dict)
-                st.success(f"Columna de fecha detectada: {columna_fecha}")
-            except:
-                st.warning("No se pudo procesar la columna de fecha")
-        else:
-            st.info("No se encontró columna de fecha")
-
-        # ================================
-        # DATOS NUMÉRICOS
-        # ================================
-        X = df.select_dtypes(include=["int64", "float64"])
-
-        if X.shape[1] == 0:
-            df["valor"] = range(len(df))
-            X = df[["valor"]]
-
-        # ================================
-        # ESCALADO
-        # ================================
-        scaler = MinMaxScaler()
-        X_scaled = scaler.fit_transform(X)
-
-        # ================================
-        # AUTOENCODER con MLPRegressor
-        # ================================
-        autoencoder = MLPRegressor(
-            hidden_layer_sizes=(16, 8, 4, 8, 16),
-            activation="relu",
-            solver="adam",
-            max_iter=20,
-            random_state=42,
-            verbose=False
-        )
-
-        with st.spinner("Entrenando modelo..."):
-            autoencoder.fit(X_scaled, X_scaled)
-
-        # ================================
-        # DETECCIÓN
-        # ================================
-        reconstructions = autoencoder.predict(X_scaled)
-        mse = np.mean(np.power(X_scaled - reconstructions, 2), axis=1)
-        threshold = np.percentile(mse, 97)
-
-        df["anomaly"] = mse > threshold
-
-        # ================================
-        # METADATA (HORA PERÚ)
-        # ================================
-        id_carga = str(uuid.uuid4())
-        df["id_carga"] = id_carga
-        df["archivo_nombre"] = archivo.name
-        df["fecha_evaluacion"] = datetime.now(zona_peru).strftime("%Y-%m-%d %H:%M:%S")
-
-        # ================================
-        # GUARDAR HISTÓRICO
-        # ================================
-        if os.path.exists(archivo_historico):
-            df_old = pd.read_csv(archivo_historico)
-            df_total = pd.concat([df_old, df], ignore_index=True)
-        else:
-            df_total = df
-
-        df_total.to_csv(archivo_historico, index=False)
-
-        st.session_state.analizado = True
-        st.session_state.ultima_carga = id_carga
-
-        st.subheader("📌 Resultado de esta carga")
-        st.dataframe(df)
-
-        st.write(f"Total registros: {len(df)}")
-        st.write(f"Anomalías detectadas: {df['anomaly'].sum()}")
-
-
-# ================================
-# VER ANOMALÍAS POR CARGA
-# ================================
-if st.session_state.analizado and os.path.exists(archivo_historico):
-
-    df_hist = pd.read_csv(archivo_historico)
-
-    st.subheader("🔎 Ver anomalías por carga")
-
-    cargas = df_hist["id_carga"].unique()
-
-    carga_sel = st.selectbox(
-        "Selecciona una carga",
-        cargas,
-        index=list(cargas).index(st.session_state.ultima_carga)
+    # Gráfica evolución anomalías
+    fig1 = go.Figure()
+    fig1.add_trace(go.Scatter(
+        x=df_log["fecha"], y=df_log["pct_anomalias"],
+        mode="lines+markers+text",
+        text=df_log["archivo"],
+        textposition="top center",
+        line=dict(color="#60a5fa", width=2),
+        marker=dict(size=8, color="#a78bfa")
+    ))
+    fig1.update_layout(
+        title="Evolución del % de anomalías por análisis",
+        xaxis_title="Fecha", yaxis_title="% Anomalías",
+        **PLOT_LAYOUT
     )
+    st.plotly_chart(fig1, use_container_width=True)
 
-    df_filtrado = df_hist[df_hist["id_carga"] == carga_sel]
-    anomalías = df_filtrado[df_filtrado["anomaly"] == True]
-
-    st.subheader("🚨 Anomalías de la carga seleccionada")
-    st.dataframe(anomalías)
-
-    st.write(f"Total anomalías: {len(anomalías)}")
+    # Gráfica registros vs anomalías
+    fig2 = go.Figure()
+    fig2.add_trace(go.Bar(
+        x=df_log["id_carga"], y=df_log["registros"],
+        name="Total", marker_color="#60a5fa"
+    ))
+    fig2.add_trace(go.Bar(
+        x=df_log["id_carga"], y=df_log["anomalias"],
+        name="Anomalías", marker_color="#f87171"
+    ))
+    fig2.update_layout(
+        barmode="overlay",
+        title="Registros totales vs anomalías por carga",
+        xaxis_title="ID Carga", yaxis_title="Cantidad",
+        **PLOT_LAYOUT
+    )
+    st.plotly_chart(fig2, use_container_width=True)
